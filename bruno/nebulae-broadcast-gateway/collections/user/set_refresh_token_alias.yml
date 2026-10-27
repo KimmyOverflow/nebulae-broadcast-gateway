@@ -1,0 +1,22 @@
+info:
+  name: set_refresh_token_alias
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: http://127.0.0.1:1225/api/user/set_refresh_token_alias
+  body:
+    type: json
+    data: |-
+      {
+        "token_id": 1,
+        "alias": "Bruno"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -1,0 +1,18 @@
+opencollection: 1.0.0
+info:
+  name: "nebulae-broadcast-gateway"
+  type: workspace
+
+collections:
+  - name: "auth"
+    path: "collections/auth"
+  - name: "stat"
+    path: "collections/stat"
+  - name: "user"
+    path: "collections/user"
+  - name: "evevt"
+    path: "collections/evevt"
+
+specs:
+
+docs: ''

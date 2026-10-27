@@ -1,0 +1,21 @@
+info:
+  name: del_stream_token
+  type: http
+  seq: 6
+
+http:
+  method: DELETE
+  url: http://127.0.0.1:1225/api/user/del_stream_token
+  body:
+    type: json
+    data: |-
+      {
+        "token_id": 5
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

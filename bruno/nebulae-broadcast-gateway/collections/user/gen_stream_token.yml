@@ -1,0 +1,21 @@
+info:
+  name: gen_stream_token
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: http://127.0.0.1:1225/api/user/gen_stream_token
+  body:
+    type: json
+    data: |-
+      {
+        "alias": "TEST"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

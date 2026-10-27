@@ -1,0 +1,6 @@
+allowBuilds:
+  bcrypt: true
+  sqlite3: true
+  win-dpapi: true
+onlyBuiltDependencies:
+  - bcrypt

@@ -1,0 +1,23 @@
+info:
+  name: login
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: http://127.0.0.1:1225/api/auth/login
+  body:
+    type: json
+    data: |-
+      {
+        "username": "dess",
+        "totp_token": "859266",
+        "remember_me": true
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
