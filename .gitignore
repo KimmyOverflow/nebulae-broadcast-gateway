@@ -3,3 +3,4 @@ logs
 node_modules
 key.enc
 prod.db
+package.json
