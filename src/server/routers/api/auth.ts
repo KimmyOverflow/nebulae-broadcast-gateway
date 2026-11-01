@@ -1,11 +1,14 @@
 import { json, Router } from "express";
 import { requireLogin } from "../../middlewares/auth";
-import { boolean, number, object, safeParse, string } from "zod";
+import { boolean, object, safeParse, string } from "zod";
 import { DatabaseError, type AppDatabaseSql, type SqlDatabaseUser } from "../../../database/sql";
 import type { AppDatabaseRedis } from "../../../database/redis";
 import type { AppCrypto } from "../../../infra/crypto";
 import { DEVELOPMENT_MODE, LOGIN_TOKEN_MAX_AGE } from "../../../consts";
 import * as ipaddr from "ipaddr.js";
+import { decode } from "hi-base32";
+
+const TotpTokenSchema = string().regex(/^\d{6}$/)
 
 const LoginSchema = object({
     username: string(),
@@ -20,16 +23,38 @@ const RecoverSchema = object({
 
 const RegistrationSchema = object({
     username: string(),
-    passcode: string()
-})
-
-const VerifySchema = object({
-    user_id: number()
+    passcode: string(),
+    totp_secret: string(),
+    totp_token: TotpTokenSchema
 })
 
 const ResetSchema = object({
-    user_id: number()
+    username: string(),
+    passcode: string(),
+    totp_secret: string(),
+    totp_token: TotpTokenSchema
 })
+
+/** 与 generateTotpSecret 的强度对齐：160 bit，RFC 4226 建议的下限. */
+const MIN_TOTP_SECRET_BYTES = 20
+
+/**
+ * 规范化并校验客户端生成的 base32 TOTP 密钥.
+ * 密钥由前端生成，后端无法判断其随机性来源，因此至少要求格式合法且熵不低于 160 bit.
+ * 返回 null 表示不合法，否则返回规范化结果（验令牌与入库都用这一份）.
+ */
+const sanitizeTotpSecret = (secret: string) => {
+    const normalized = secret.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase()
+    if (!/^[A-Z2-7]+$/.test(normalized)) return null
+    let bytes: number[]
+    try {
+        bytes = decode.asBytes(normalized)
+    } catch {
+        return null
+    }
+    if (bytes.length < MIN_TOTP_SECRET_BYTES) return null
+    return normalized
+}
 
 export const assembleOtpauthUrl = (username: string, totpSecret: string) =>
     `otpauth://totp/NebulaeBroadcast:${username}?secret=${totpSecret}&issuer=NebulaeBroadcast`
@@ -44,44 +69,39 @@ const assembleUserResponse = (user: SqlDatabaseUser) => ({
 export function createAuthenticationRouter(databaseSql: AppDatabaseSql, databaseRedis: AppDatabaseRedis, crypto: AppCrypto) {
     const router = Router()
 
-    // #region registration
+    // #region register
 
-    router.post('/api/auth/registration', json(), async (req, res) => {
+    router.post('/api/auth/register', json(), async (req, res) => {
         const parsed = safeParse(RegistrationSchema, req.body)
         if (parsed.error) {
             res.status(400).send({ error: '参数错误' })
             return
         }
-        const totpSecret = crypto.generateTotpSecret()
+        const totpSecret = sanitizeTotpSecret(parsed.data.totp_secret)
+        if (totpSecret === null) {
+            res.status(400).send({ error: "TOTP 密钥格式不合法或长度不足" })
+            return
+        }
+        // 密钥由前端生成并在添加令牌后自校验过一次，后端复核以确认验证器确实配置正确.
+        if (crypto.validateTotpToken(parsed.data.totp_token, totpSecret) === null) {
+            res.status(400).send({ error: "TOTP 口令校验失败" })
+            return
+        }
         const totpSecretEncrypted = crypto.aes256Encrypt(totpSecret)
         const passcodeHash = await crypto.bcryptHash(parsed.data.passcode)
+        let userId: number | null = null
         try {
-            databaseSql.insertUser(parsed.data.username, totpSecretEncrypted, passcodeHash)
+            userId = databaseSql.insertUser(parsed.data.username, totpSecretEncrypted, passcodeHash)
         } catch (err) {
             if (err instanceof DatabaseError && (err.originalError as any).errcode === 2067) {
                 res.status(409).send({ error: "用户名已被占用" })
                 return
-            } else throw err // LOL
+            } else throw err // FIXME: do something about this
         }
-        res.status(200).send({ otpauth_url: assembleOtpauthUrl(parsed.data.username, totpSecret) });
-    })
-
-    // #endregion
-
-    // #region verify
-
-    router.put('/api/auth/verify', requireLogin({ requireAdmin: true }), json(), async (req, res) => {
-        const parsed = safeParse(VerifySchema, req.body)
-        if (parsed.error) {
-            res.status(400).send({ error: '参数错误' })
-            return
+        if (userId === null) {
+            throw new Error("用户插入失败")
         }
-        const { changes } = databaseSql.setUserVerified(parsed.data.user_id)
-        if (changes === 0) {
-            res.status(400).send({ error: "用户ID不存在或已经通过验证" })
-            return
-        }
-        res.status(200).end()
+        res.status(200).send({ user_id: userId });
     })
 
     // #endregion
@@ -310,9 +330,9 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
 
     // #endregion
 
-    // #region recovery
+    // #region recover
 
-    router.post('/api/auth/recovery', json(), async (req, res) => {
+    router.post('/api/auth/recover', json(), async (req, res) => {
         const parsed = safeParse(RecoverSchema, req.body)
         if (parsed.error) {
             res.status(400).send({ error: '参数错误' })
@@ -329,51 +349,51 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             return
         }
 
-        if (user.totp_secret_encrypted !== null) {
-            if (user.recovery_pending === 1) {
-                res.status(400).send({ error: "已有待处理的找回请求" })
-                return
-            }
+        // 首次请求：标记待处理并吊销该用户的全部登录凭据；重复请求同样返回 202，便于前端安全重试.
+        if (user.recovery_pending === 0) {
             databaseSql.setUserRecoveryPending(user.id, true)
             databaseSql.removeRefreshTokens(user.id)
             databaseSql.removeStreamTokens(user.id)
             await databaseRedis.delSessionsFromUser(user.id)
-            res.status(200).end()
-            return
         }
-
-        const newTotpSecret = crypto.generateTotpSecret()
-        const newTotpSecretEncrypted = crypto.aes256Encrypt(newTotpSecret)
-        databaseSql.updateTotpSecretEncrypted(user.id, newTotpSecretEncrypted)
-        databaseSql.setUserRecoveryPending(user.id, false)
-        res.status(200).send({
-            message: "管理员已通过找回请求",
-            new_otpauth_url: assembleOtpauthUrl(user.username, newTotpSecret)
-        })
+        res.status(202).end()
     })
 
     // #endregion
 
     // #region reset
 
-    router.put('/api/auth/reset', requireLogin({ requireAdmin: true }), json(), (req, res) => {
+    // 管理员批准找回请求后 totp_secret_encrypted 被置空，用户在此提交新的 TOTP 密钥完成重置.
+    router.put('/api/auth/reset', json(), async (req, res) => {
         const parsed = safeParse(ResetSchema, req.body)
         if (parsed.error) {
             res.status(400).send({ error: '参数错误' })
             return
         }
-        const targetUser = databaseSql.selectUserById(parsed.data.user_id)
-        if (targetUser === null) {
-            res.status(400).send({ error: "目标用户不存在" })
+        const user = databaseSql.selectUserByUsername(parsed.data.username)
+        // 先校验口令再看账号状态，避免未通过口令校验的请求探测账号是否处于找回流程.
+        const passcodeMatched = user !== null
+            && await crypto.bcryptCompare(parsed.data.passcode, user.passcode_hash)
+        if (user === null || passcodeMatched !== true) {
+            res.status(401).send({ error: "用户名或安全口令错误" })
             return
         }
-        if (targetUser.recovery_pending === 0) {
-            res.status(400).send({ error: "目标用户未请求找回" })
+        if (user.totp_secret_encrypted !== null) {
+            res.status(400).send({ error: "该账号当前不处于待重置状态" })
             return
         }
-        databaseSql.updateTotpSecretEncrypted(parsed.data.user_id, null)
-        databaseSql.setUserRecoveryPending(parsed.data.user_id, false)
-        res.status(200).end()
+        const totpSecret = sanitizeTotpSecret(parsed.data.totp_secret)
+        if (totpSecret === null) {
+            res.status(400).send({ error: "TOTP 密钥格式不合法或长度不足" })
+            return
+        }
+        if (crypto.validateTotpToken(parsed.data.totp_token, totpSecret) === null) {
+            res.status(400).send({ error: "TOTP 口令校验失败" })
+            return
+        }
+        databaseSql.updateTotpSecretEncrypted(user.id, crypto.aes256Encrypt(totpSecret))
+        databaseSql.setUserRecoveryPending(user.id, false)
+        res.status(200).send({ user_id: user.id })
     })
 
     // #endregion

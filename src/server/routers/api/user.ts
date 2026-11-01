@@ -28,6 +28,14 @@ const DeleteStreamTokenSchema = object({
     token_id: number()
 })
 
+const ResetTotpSchema = object({
+    user_id: number()
+})
+
+const VerifyUserSchema = object({
+    user_id: number()
+})
+
 export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: AppDatabaseRedis, crypto: AppCrypto) {
     const router = Router()
 
@@ -200,6 +208,42 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
             return
         }
         databaseSql.removeStreamToken(parsed.data.token_id)
+        res.status(200).end()
+    })
+
+    // 管理员批准注册：把待验证用户标记为已验证.
+    router.put('/api/user/verify', requireLogin({ requireAdmin: true }), json(), (req, res) => {
+        const parsed = safeParse(VerifyUserSchema, req.body)
+        if (parsed.error) {
+            res.status(400).send({ error: '参数错误' })
+            return
+        }
+        const { changes } = databaseSql.setUserVerified(parsed.data.user_id)
+        if (changes === 0) {
+            res.status(400).send({ error: "用户ID不存在或已经通过验证" })
+            return
+        }
+        res.status(200).end()
+    })
+
+    // 管理员批准找回请求：清空 TOTP 密钥并保留 recovery_pending（阻止登录），
+    // 等待用户通过 /api/auth/reset 提交新密钥.
+    router.put('/api/user/reset', requireLogin({ requireAdmin: true }), json(), (req, res) => {
+        const parsed = safeParse(ResetTotpSchema, req.body)
+        if (parsed.error) {
+            res.status(400).send({ error: '参数错误' })
+            return
+        }
+        const targetUser = databaseSql.selectUserById(parsed.data.user_id)
+        if (targetUser === null) {
+            res.status(400).send({ error: "目标用户不存在" })
+            return
+        }
+        if (targetUser.recovery_pending === 0) {
+            res.status(400).send({ error: "目标用户未请求找回" })
+            return
+        }
+        databaseSql.updateTotpSecretEncrypted(parsed.data.user_id, null)
         res.status(200).end()
     })
 
