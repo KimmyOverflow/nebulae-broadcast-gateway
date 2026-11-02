@@ -1,79 +1,22 @@
 import { json, Router } from "express";
-import { requireLogin } from "../../middlewares/auth";
-import { boolean, object, safeParse, string } from "zod";
-import { DatabaseError, type AppDatabaseSql, type SqlDatabaseUser } from "../../../database/sql";
-import type { AppDatabaseRedis } from "../../../database/redis";
-import type { AppCrypto } from "../../../infra/crypto";
-import { DEVELOPMENT_MODE, LOGIN_TOKEN_MAX_AGE, REGISTRATION_PENDING_TIMEOUT } from "../../../consts";
+import { requireLogin } from "../../../middlewares/auth";
+
+import { DatabaseError, type AppDatabaseSql, type SqlDatabaseUser } from "../../../../database/sql";
+import type { AppDatabaseRedis } from "../../../../database/redis";
+import type { AppCrypto } from "../../../../infra/crypto";
+import { DEVELOPMENT_MODE, LOGIN_TOKEN_MAX_AGE, REGISTRATION_PENDING_TIMEOUT } from "../../../../consts";
 import * as ipaddr from "ipaddr.js";
-import { decode } from "hi-base32";
 
-const TotpTokenSchema = string().regex(/^\d{6}$/)
+import { safeParse } from "zod";
 
-/**
- * 用户名会被拼进 otpauth 的 label，因此禁止空白与 URL 保留字符；
- * 其余字符（含中文）允许。大小写敏感，与数据库 UNIQUE 的比较规则一致.
- */
-const UsernameSchema = string()
-    .trim()
-    .min(1)
-    .max(32)
-    .regex(/^[^\s:/?&#%+=\u0000-\u001F\u007F]+$/)
-
-const LoginSchema = object({
-    username: string(),
-    totp_token: string(),
-    remember_me: boolean()
-})
-
-const RecoverSchema = object({
-    username: string(),
-    passcode: string()
-})
-
-/** 注册第一步：抢占用户名，此时还不存在 TOTP 密钥. */
-const StartRegistrationSchema = object({
-    username: UsernameSchema,
-    passcode: string()
-})
-
-/** 注册第二步：凭签名令牌补交 TOTP 密钥. */
-const FinishRegistrationSchema = object({
-    registration_token: string(),
-    totp_secret: string(),
-    totp_token: TotpTokenSchema
-})
-
-const ResetSchema = object({
-    username: string(),
-    passcode: string(),
-    totp_secret: string(),
-    totp_token: TotpTokenSchema
-})
-
-/** 与 generateTotpSecret 的强度对齐：160 bit，RFC 4226 建议的下限. */
-const MIN_TOTP_SECRET_BYTES = 20
-
-/**
- * 规范化并校验客户端生成的 base32 TOTP 密钥.
- * 密钥由前端生成，后端无法判断其随机性来源，因此至少要求格式合法且熵不低于 160 bit.
- * 返回 null 表示不合法，否则返回规范化结果（验令牌与入库都用这一份）.
- */
-const sanitizeTotpSecret = (secret: string) => {
-    const normalized = secret.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase()
-    if (!/^[A-Z2-7]+$/.test(normalized)) return null
-    let bytes: number[]
-    try {
-        bytes = decode.asBytes(normalized)
-    } catch {
-        return null
-    }
-    if (bytes.length < MIN_TOTP_SECRET_BYTES) return null
-    return normalized
-}
-
-export const assembleOtpauthUrl = (username: string, totpSecret: string) =>
-    `otpauth://totp/${encodeURIComponent(`NebulaeBroadcast:${username}`)}?secret=${totpSecret}&issuer=NebulaeBroadcast`
+import {
+    StartRegistrationSchema,
+    FinishRegistrationSchema,
+    LoginSchema,
+    RecoverSchema,
+    ResetSchema
+} from "./schemas";
+import { sanitizeTotpSecret } from "./utilities";
 
 const assembleUserResponse = (user: SqlDatabaseUser) => ({
     user_id: user.id,

@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { requireLogin } from "../../middlewares/auth";
-import type { AppDatabaseSql } from "../../../database/sql";
-import type { AppDatabaseRedis } from "../../../database/redis";
+import { requireLogin } from "../../../middlewares/auth";
+import type { AppDatabaseSql } from "../../../../database/sql";
+import type { AppDatabaseRedis } from "../../../../database/redis";
 
 export function createStatRouter(databaseSql: AppDatabaseSql, databaseRedis: AppDatabaseRedis) {
     const router = Router()

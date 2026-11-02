@@ -40,6 +40,7 @@ app.listen(LISTENING_PORT, () => {
 })
 
 // 定期清理没有完成 TOTP 设置的待注册账号，避免用户名被永久占用.
+// TODO: 统一管理定时任务
 const registrationCleanup = setInterval(() => {
     try {
         const { changes } = databaseSql.removeAbandonedRegistrations(

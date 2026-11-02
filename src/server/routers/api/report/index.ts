@@ -1,7 +1,7 @@
 import { json, Router } from "express";
-import { requireLogin } from "../../middlewares/auth";
+import { requireLogin } from "../../../middlewares/auth";
 import { object, safeParse, string } from "zod";
-import type { AppDatabaseRedis } from "../../../database/redis";
+import type { AppDatabaseRedis } from "../../../../database/redis";
 
 const PlayStartSchema = object({
     stream_id: string(),

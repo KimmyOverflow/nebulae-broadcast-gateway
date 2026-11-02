@@ -1,43 +1,24 @@
 import { json, raw, Router } from "express";
-import { requireLogin } from "../../middlewares/auth";
-import type { AppDatabaseSql } from "../../../database/sql";
-import type { AppCrypto } from "../../../infra/crypto";
-import { number, object, safeParse, string } from "zod";
-import type { AppDatabaseRedis } from "../../../database/redis";
-import { PROFILE_PIC_MAX_SIZE } from "../../../consts";
-
-const SetStreamTokenAliasSchema = object({
-    token_id: number(),
-    alias: string()
-})
-
-const SetRefreshTokenAliasSchema = object({
-    token_id: number(),
-    alias: string()
-})
-
-const DeleteRefreshTokenSchema = object({
-    token_id: number()
-})
-
-const GenerateStreamTokenSchema = object({
-    alias: string()
-})
-
-const DeleteStreamTokenSchema = object({
-    token_id: number()
-})
-
-const ResetTotpSchema = object({
-    user_id: number()
-})
-
-const VerifyUserSchema = object({
-    user_id: number()
-})
+import { requireLogin } from "../../../middlewares/auth";
+import type { AppDatabaseSql } from "../../../../database/sql";
+import type { AppCrypto } from "../../../../infra/crypto";
+import { safeParse } from "zod";
+import type { AppDatabaseRedis } from "../../../../database/redis";
+import { PROFILE_PIC_MAX_SIZE } from "../../../../consts";
+import {
+    SetRefreshTokenAliasSchema,
+    DeleteRefreshTokenSchema,
+    GenerateStreamTokenSchema,
+    SetStreamTokenAliasSchema,
+    DeleteStreamTokenSchema,
+    VerifyUserSchema,
+    ResetTotpSchema
+} from "./schemas";
 
 export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: AppDatabaseRedis, crypto: AppCrypto) {
     const router = Router()
+
+    // #region query
 
     router.get('/api/user/query', (req, res) => {
         const param = (req.query['user_id'] ?? null) as string | null
@@ -64,6 +45,10 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
             created_at: user.created_at
         }})
     })
+
+    // #endregion
+
+    // #region profile_pic
 
     router.get('/api/user/profile_pic', (req, res) => {
         const param = (req.query['user_id'] ?? null) as string | null
@@ -106,6 +91,10 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
         res.status(200).send(data)
     })
 
+    // #endregion
+    
+    // #region update_profile_pic
+
     router.post('/api/user/update_profile_pic',
         requireLogin(),
         (req, res, next) => {
@@ -140,6 +129,10 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
             res.status(200).end()
         }
     )
+
+    // #endregion
+
+    // #region Refresh Token
 
     router.get('/api/user/refresh_tokens', requireLogin(), async (req, res) => {
         const refreshTokens = databaseSql.getRefreshTokens(req.session.userId!)
@@ -186,6 +179,10 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
         res.status(200).send({ stream_token: streamToken })
     })
 
+    // #endregion
+    
+    // #region Stream Token
+
     router.get('/api/user/stream_tokens', requireLogin(), (req, res) => {
         const streamTokens = databaseSql.getStreamTokens(req.session.userId!)
         res.status(200).send({ stream_tokens: streamTokens })
@@ -210,6 +207,10 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
         databaseSql.removeStreamToken(parsed.data.token_id)
         res.status(200).end()
     })
+
+    // #endregion
+
+    // #region Admin Privileged
 
     // 管理员批准注册：把待验证用户标记为已验证.
     router.put('/api/user/verify', requireLogin({ requireAdmin: true }), json(), (req, res) => {

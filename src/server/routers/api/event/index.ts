@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { requireLogin } from "../../middlewares/auth";
-import type { EventBus, EventHandler, EventHeader } from "../../../infra/event-bus";
-import type { AppEvents } from "../../../infra/event-bus/events";
+import { requireLogin } from "../../../middlewares/auth";
+import type { EventBus, EventHandler, EventHeader } from "../../../../infra/event-bus";
+import type { AppEvents } from "../../../../infra/event-bus/events";
 
 export function createEventRouter(eventBus: EventBus<AppEvents>) {
     const router = Router()
