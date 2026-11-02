@@ -218,12 +218,40 @@ export function createUserRouter(databaseSql: AppDatabaseSql, databaseRedis: App
             res.status(400).send({ error: '参数错误' })
             return
         }
+        const targetUser = databaseSql.selectUserById(parsed.data.user_id)
+        if (targetUser === null) {
+            res.status(400).send({ error: "目标用户不存在" })
+            return
+        }
+        // 未完成 TOTP 设置的账号不应被批准，否则批准出来的是个登录不了的死号.
+        if (targetUser.totp_secret_encrypted === null) {
+            res.status(400).send({ error: "目标用户尚未完成 TOTP 设置" })
+            return
+        }
         const { changes } = databaseSql.setUserVerified(parsed.data.user_id)
         if (changes === 0) {
             res.status(400).send({ error: "用户ID不存在或已经通过验证" })
             return
         }
         res.status(200).end()
+    })
+
+    // 管理员待办队列：注册待批准与找回待批准两类.
+    // 找回项中 totp_installed 为 false 表示已批准，仅剩用户提交新密钥这一步.
+    router.get('/api/user/pending', requireLogin({ requireAdmin: true }), (_req, res) => {
+        res.status(200).send({
+            pending_registrations: databaseSql.getPendingRegistrations().map(user => ({
+                user_id: user.id,
+                username: user.username,
+                created_at: user.created_at
+            })),
+            pending_recoveries: databaseSql.getPendingRecoveries().map(user => ({
+                user_id: user.id,
+                username: user.username,
+                created_at: user.created_at,
+                totp_installed: user.totp_installed === 1
+            }))
+        })
     })
 
     // 管理员批准找回请求：清空 TOTP 密钥并保留 recovery_pending（阻止登录），

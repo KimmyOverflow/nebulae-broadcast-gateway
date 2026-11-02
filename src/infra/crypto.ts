@@ -158,6 +158,44 @@ export class AppCrypto {
         }
     }
 
+    /**
+     * 生成短效注册令牌，用于完成注册的第二步.
+     * 与刷新令牌不同，它不需要 rnd：完成注册后密钥不再为 NULL，重放会被状态校验拒绝.
+     */
+    public generateRegistrationToken(userId: number, maxAge: number) {
+        const exp = Date.now() + maxAge
+        const payload = JSON.stringify({ uid: userId, typ: 'reg', exp })
+        const payloadEncoded = Buffer.from(payload).toString('base64url')
+        return payloadEncoded + '.' + this.hmacSign(payloadEncoded)
+    }
+
+    /** 验证注册令牌的 HMAC 签名与类型. 返回 null 表示签名无效、类型不符或格式错误. */
+    public parseRegistrationToken(token: string) {
+        const dotIndex = token.indexOf('.')
+        if (dotIndex === -1) return null
+
+        const payloadEncoded = token.substring(0, dotIndex)
+        const signature = token.substring(dotIndex + 1)
+
+        if (!this.hmacVerify(payloadEncoded, signature)) return null
+
+        let payload: any
+        try {
+            payload = JSON.parse(Buffer.from(payloadEncoded, 'base64url').toString('utf-8'))
+        } catch {
+            return null
+        }
+
+        if (typeof payload.uid !== 'number' || payload.typ !== 'reg' || typeof payload.exp !== 'number') {
+            return null
+        }
+
+        return {
+            userId: payload.uid as number,
+            exp: payload.exp as number
+        }
+    }
+
     public generateStreamToken() {
         return randomBytes(32).toString('base64url')
     }

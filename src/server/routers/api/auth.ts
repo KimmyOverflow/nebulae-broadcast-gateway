@@ -4,11 +4,21 @@ import { boolean, object, safeParse, string } from "zod";
 import { DatabaseError, type AppDatabaseSql, type SqlDatabaseUser } from "../../../database/sql";
 import type { AppDatabaseRedis } from "../../../database/redis";
 import type { AppCrypto } from "../../../infra/crypto";
-import { DEVELOPMENT_MODE, LOGIN_TOKEN_MAX_AGE } from "../../../consts";
+import { DEVELOPMENT_MODE, LOGIN_TOKEN_MAX_AGE, REGISTRATION_PENDING_TIMEOUT } from "../../../consts";
 import * as ipaddr from "ipaddr.js";
 import { decode } from "hi-base32";
 
 const TotpTokenSchema = string().regex(/^\d{6}$/)
+
+/**
+ * 用户名会被拼进 otpauth 的 label，因此禁止空白与 URL 保留字符；
+ * 其余字符（含中文）允许。大小写敏感，与数据库 UNIQUE 的比较规则一致.
+ */
+const UsernameSchema = string()
+    .trim()
+    .min(1)
+    .max(32)
+    .regex(/^[^\s:/?&#%+=\u0000-\u001F\u007F]+$/)
 
 const LoginSchema = object({
     username: string(),
@@ -21,9 +31,15 @@ const RecoverSchema = object({
     passcode: string()
 })
 
-const RegistrationSchema = object({
-    username: string(),
-    passcode: string(),
+/** 注册第一步：抢占用户名，此时还不存在 TOTP 密钥. */
+const StartRegistrationSchema = object({
+    username: UsernameSchema,
+    passcode: string()
+})
+
+/** 注册第二步：凭签名令牌补交 TOTP 密钥. */
+const FinishRegistrationSchema = object({
+    registration_token: string(),
     totp_secret: string(),
     totp_token: TotpTokenSchema
 })
@@ -57,7 +73,7 @@ const sanitizeTotpSecret = (secret: string) => {
 }
 
 export const assembleOtpauthUrl = (username: string, totpSecret: string) =>
-    `otpauth://totp/NebulaeBroadcast:${username}?secret=${totpSecret}&issuer=NebulaeBroadcast`
+    `otpauth://totp/${encodeURIComponent(`NebulaeBroadcast:${username}`)}?secret=${totpSecret}&issuer=NebulaeBroadcast`
 
 const assembleUserResponse = (user: SqlDatabaseUser) => ({
     user_id: user.id,
@@ -71,10 +87,57 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
 
     // #region register
 
+    // 注册第一步：立刻写入一行待注册账号（TOTP 密钥留空）以原子地占用用户名，
+    // 并通过签名令牌把后续的密钥设置绑定到这次请求上，避免二次提交口令.
     router.post('/api/auth/register', json(), async (req, res) => {
-        const parsed = safeParse(RegistrationSchema, req.body)
+        const parsed = safeParse(StartRegistrationSchema, req.body)
         if (parsed.error) {
             res.status(400).send({ error: '参数错误' })
+            return
+        }
+        const passcodeHash = await crypto.bcryptHash(parsed.data.passcode)
+        let userId: number | null = null
+        try {
+            userId = databaseSql.insertUser(parsed.data.username, null, passcodeHash)
+        } catch (err) {
+            if (err instanceof DatabaseError && (err.originalError as any).errcode === 2067) {
+                res.status(409).send({ error: "用户名已被占用" })
+                return
+            } else throw err // FIXME: do something about this
+        }
+        if (userId === null) {
+            throw new Error("用户插入失败")
+        }
+        res.status(200).send({
+            user_id: userId,
+            registration_token: crypto.generateRegistrationToken(userId, REGISTRATION_PENDING_TIMEOUT)
+        })
+    })
+
+    // 注册第二步：用户已把密钥加入验证器并算出一次口令，这里复核后补写密钥.
+    // 账号仍保持 verified = 0，等待管理员批准.
+    router.put('/api/auth/register', json(), async (req, res) => {
+        const parsed = safeParse(FinishRegistrationSchema, req.body)
+        if (parsed.error) {
+            res.status(400).send({ error: '参数错误' })
+            return
+        }
+        const token = crypto.parseRegistrationToken(parsed.data.registration_token)
+        if (token === null) {
+            res.status(401).send({ error: "注册令牌无效" })
+            return
+        }
+        if (Date.now() > token.exp) {
+            res.status(401).send({ error: "注册令牌已过期" })
+            return
+        }
+        const user = databaseSql.selectUserById(token.userId)
+        if (user === null || user.verified !== 0) {
+            res.status(400).send({ error: "账号状态不允许完成注册" })
+            return
+        }
+        if (user.totp_secret_encrypted !== null) {
+            res.status(400).send({ error: "该账号已完成 TOTP 设置" })
             return
         }
         const totpSecret = sanitizeTotpSecret(parsed.data.totp_secret)
@@ -87,21 +150,8 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             res.status(400).send({ error: "TOTP 口令校验失败" })
             return
         }
-        const totpSecretEncrypted = crypto.aes256Encrypt(totpSecret)
-        const passcodeHash = await crypto.bcryptHash(parsed.data.passcode)
-        let userId: number | null = null
-        try {
-            userId = databaseSql.insertUser(parsed.data.username, totpSecretEncrypted, passcodeHash)
-        } catch (err) {
-            if (err instanceof DatabaseError && (err.originalError as any).errcode === 2067) {
-                res.status(409).send({ error: "用户名已被占用" })
-                return
-            } else throw err // FIXME: do something about this
-        }
-        if (userId === null) {
-            throw new Error("用户插入失败")
-        }
-        res.status(200).send({ user_id: userId });
+        databaseSql.updateTotpSecretEncrypted(user.id, crypto.aes256Encrypt(totpSecret))
+        res.status(200).send({ user_id: user.id })
     })
 
     // #endregion
@@ -349,6 +399,13 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             return
         }
 
+        // 未通过管理员批准的账号不算正式用户：返回 202 但不进入找回流程，
+        // 以免污染"verified = 0 即待注册"这一区分依据.
+        if (user.verified === 0) {
+            res.status(202).end()
+            return
+        }
+
         // 首次请求：标记待处理并吊销该用户的全部登录凭据；重复请求同样返回 202，便于前端安全重试.
         if (user.recovery_pending === 0) {
             databaseSql.setUserRecoveryPending(user.id, true)
@@ -378,7 +435,7 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             res.status(401).send({ error: "用户名或安全口令错误" })
             return
         }
-        if (user.totp_secret_encrypted !== null) {
+        if (user.verified !== 1 || user.totp_secret_encrypted !== null) {
             res.status(400).send({ error: "该账号当前不处于待重置状态" })
             return
         }

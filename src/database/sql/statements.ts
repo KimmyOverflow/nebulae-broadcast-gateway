@@ -15,6 +15,9 @@ export type AppDatabaseSqlStatements = {
     selectPasscodeHash: StatementSync
     updateTotpSecretEncrypted: StatementSync
     updateUserRecoveryPending: StatementSync
+    deleteAbandonedRegistrations: StatementSync
+    selectPendingRegistrations: StatementSync
+    selectPendingRecoveries: StatementSync
     insertRefreshToken: StatementSync
     selectRefreshToken: StatementSync
     selectRefreshTokenById: StatementSync
@@ -106,6 +109,26 @@ export function prepareStatements(db: DatabaseSync): AppDatabaseSqlStatements {
             UPDATE users
             SET recovery_pending = ?
             WHERE id = ?;
+        `),
+        deleteAbandonedRegistrations: db.prepare(`
+            DELETE FROM users
+            WHERE verified = 0
+              AND totp_secret_encrypted IS NULL
+              AND created_at < ?;
+        `),
+        selectPendingRegistrations: db.prepare(`
+            SELECT id, username, created_at
+            FROM users
+            WHERE verified = 0
+              AND totp_secret_encrypted IS NOT NULL
+            ORDER BY created_at;
+        `),
+        selectPendingRecoveries: db.prepare(`
+            SELECT id, username, created_at, totp_secret_encrypted IS NOT NULL AS totp_installed
+            FROM users
+            WHERE verified = 1
+              AND recovery_pending = 1
+            ORDER BY created_at;
         `),
         // #endregion
         // #region Refresh token

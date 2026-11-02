@@ -141,7 +141,7 @@ export class AppDatabaseSql {
 
     // #region User & Auth
 
-    public insertUser(username: string, totpSecretEncrypted: string, passcodeHash: string) {
+    public insertUser(username: string, totpSecretEncrypted: string | null, passcodeHash: string) {
         const row = this.execGet(this.stmts.insertUser, [username, totpSecretEncrypted, passcodeHash])
         if (row === undefined) return null
         return row['id'] as number
@@ -219,6 +219,36 @@ export class AppDatabaseSql {
 
     public setUserRecoveryPending(userId: number, pending: boolean) {
         return this.execRun(this.stmts.updateUserRecoveryPending, [pending ? 1 : 0, userId])
+    }
+
+    /** 删除未完成 TOTP 设置的待注册账号. 已完成设置的账号（等待管理员批准）不受影响. */
+
+    public removeAbandonedRegistrations(cutoff: string) {
+        return this.execRun(this.stmts.deleteAbandonedRegistrations, [cutoff])
+    }
+
+    /** 列出已完成 TOTP 设置、等待管理员批准的注册. */
+
+    public getPendingRegistrations() {
+        return this.execAll(this.stmts.selectPendingRegistrations, []) as {
+            id: number,
+            username: string,
+            created_at: string
+        }[]
+    }
+
+    /**
+     * 列出发起过找回的账号.
+     * totp_installed 为 true 表示管理员尚未批准；为 false 表示已批准、等待用户提交新密钥.
+     */
+
+    public getPendingRecoveries() {
+        return this.execAll(this.stmts.selectPendingRecoveries, []) as {
+            id: number,
+            username: string,
+            created_at: string,
+            totp_installed: 0 | 1
+        }[]
     }
 
     // #endregion

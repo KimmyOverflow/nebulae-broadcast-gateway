@@ -1,4 +1,4 @@
-import { LISTENING_PORT } from "./consts";
+import { LISTENING_PORT, REGISTRATION_CLEANUP_INTERVAL, REGISTRATION_PENDING_TIMEOUT } from "./consts";
 import e, { urlencoded, type Application } from "express";
 import nocache from "nocache";
 import cookieParser from "cookie-parser";
@@ -38,5 +38,20 @@ const app: Application = e()
 app.listen(LISTENING_PORT, () => {
     console.log(`Server listening on port ${LISTENING_PORT}.`)
 })
+
+// 定期清理没有完成 TOTP 设置的待注册账号，避免用户名被永久占用.
+const registrationCleanup = setInterval(() => {
+    try {
+        const { changes } = databaseSql.removeAbandonedRegistrations(
+            new Date(Date.now() - REGISTRATION_PENDING_TIMEOUT).toISOString()
+        )
+        if (changes > 0) {
+            console.log(`已清理 ${changes} 个未完成注册的账号.`)
+        }
+    } catch (err) {
+        console.error('清理未完成注册的账号失败:', err)
+    }
+}, REGISTRATION_CLEANUP_INTERVAL)
+registrationCleanup.unref()
 
 // prepareTestAccount(databaseSql, crypto)
