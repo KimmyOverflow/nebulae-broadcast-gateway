@@ -18,7 +18,7 @@ import {
 } from "./schemas";
 import { sanitizeTotpSecret } from "./utilities";
 
-const assembleUserResponse = (user: SqlDatabaseUser) => ({
+const assembleUserResponse = (user: Omit<SqlDatabaseUser, 'passcode_hash'> & { recovery_passphrase_hash: string }) => ({
     user_id: user.id,
     username: user.username,
     role: user.role,
@@ -38,10 +38,10 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             res.status(400).send({ error: '参数错误' })
             return
         }
-        const passcodeHash = await crypto.bcryptHash(parsed.data.passcode)
+        const recoveryPassphraseHash = await crypto.bcryptHash(parsed.data.recovery_passphrase)
         let userId: number | null = null
         try {
-            userId = databaseSql.insertUser(parsed.data.username, null, passcodeHash)
+            userId = databaseSql.insertUser(parsed.data.username, null, recoveryPassphraseHash)
         } catch (err) {
             if (err instanceof DatabaseError && (err.originalError as any).errcode === 2067) {
                 res.status(409).send({ error: "用户名已被占用" })
@@ -336,7 +336,7 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
             res.status(401).send({ error: "用户不存在" })
             return
         }
-        const result = await crypto.bcryptCompare(parsed.data.passcode, user.passcode_hash)
+        const result = await crypto.bcryptCompare(parsed.data.recovery_passphrase, user.recovery_passphrase_hash)
         if (result === false) {
             res.status(401).send({ error: "安全口令不正确" })
             return
@@ -373,7 +373,7 @@ export function createAuthenticationRouter(databaseSql: AppDatabaseSql, database
         const user = databaseSql.selectUserByUsername(parsed.data.username)
         // 先校验口令再看账号状态，避免未通过口令校验的请求探测账号是否处于找回流程.
         const passcodeMatched = user !== null
-            && await crypto.bcryptCompare(parsed.data.passcode, user.passcode_hash)
+            && await crypto.bcryptCompare(parsed.data.recovery_passphrase, user.recovery_passphrase_hash)
         if (user === null || passcodeMatched !== true) {
             res.status(401).send({ error: "用户名或安全口令错误" })
             return

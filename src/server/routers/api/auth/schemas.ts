@@ -20,13 +20,13 @@ export const LoginSchema = object({
 
 export const RecoverSchema = object({
     username: string(),
-    passcode: string()
+    recovery_passphrase: string()
 })
 
 /** 注册第一步：抢占用户名，此时还不存在 TOTP 密钥. */
 export const StartRegistrationSchema = object({
     username: UsernameSchema,
-    passcode: string()
+    recovery_passphrase: string()
 })
 
 /** 注册第二步：凭签名令牌补交 TOTP 密钥. */
@@ -38,7 +38,7 @@ export const FinishRegistrationSchema = object({
 
 export const ResetSchema = object({
     username: string(),
-    passcode: string(),
+    recovery_passphrase: string(),
     totp_secret: string(),
     totp_token: TotpTokenSchema
 })

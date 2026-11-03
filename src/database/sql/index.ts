@@ -93,22 +93,30 @@ export class AppDatabaseSql {
 
     // #region User & Auth
 
-    public insertUser(username: string, totpSecretEncrypted: string | null, passcodeHash: string) {
-        const row = this.execGet(this.stmts.insertUser, [username, totpSecretEncrypted, passcodeHash])
+    public insertUser(username: string, totpSecretEncrypted: string | null, recoveryPassphraseHash: string) {
+        const row = this.execGet(this.stmts.insertUser, [username, totpSecretEncrypted, recoveryPassphraseHash])
         if (row === undefined) return null
         return row['id'] as number
     }
 
     public selectUserById(userId: number) {
-        const row = this.execGet(this.stmts.selectUserById, [userId])
+        const row = this.execGet(this.stmts.selectUserById, [userId]) as SqlDatabaseUser | undefined
         if (row === undefined) return null
-        return row as SqlDatabaseUser
+        let { passcode_hash: recovery_passphrase_hash, ...rest } = row
+        return {
+            recovery_passphrase_hash,
+            ...rest
+        }
     }
 
     public selectUserByUsername(username: string) {
-        const row = this.execGet(this.stmts.selectUserByUsername, [username])
+        const row = this.execGet(this.stmts.selectUserByUsername, [username]) as SqlDatabaseUser | undefined
         if (row === undefined) return null
-        return row as SqlDatabaseUser
+        let { passcode_hash: recovery_passphrase_hash, ...rest } = row
+        return {
+            recovery_passphrase_hash,
+            ...rest
+        }
     }
 
     // public getUserId(username: string) {
