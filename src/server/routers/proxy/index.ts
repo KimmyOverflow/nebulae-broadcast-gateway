@@ -15,49 +15,6 @@ import {
     parseMediaServerTarget,
 } from "./validation"
 
-// /** BEGIN Deprecated code: We have ditched encoding params in base64 */
-
-// // ============================================================
-// // 代理请求中 base64 编码的 JSON 参数类型
-// // ============================================================
-
-// type WhipParameters = {
-//     username: string
-//     password: string
-//     mediaServerId: string
-//     streamName?: string
-//     streamColor?: string
-//     streamPassword?: string
-// }
-
-// type WhepParameters = {
-//     username: string
-//     password: string
-//     streamId: string
-//     mediaServerId: string
-//     streamPassword?: string
-// }
-
-// // ============================================================
-// // 工具函数
-// // ============================================================
-
-// /**
-//  * 将 base64 字符串解码为 JSON 对象.
-//  * 解析失败返回 null.
-//  */
-// function decodeParams<T>(encoded: string | undefined): T | null {
-//     try {
-//         if (!encoded) return null
-//         const decoded = Buffer.from(encoded, "base64").toString("utf-8")
-//         return JSON.parse(decoded) as T
-//     } catch {
-//         return null
-//     }
-// }
-
-// /** END Deprecated code */
-
 /**
  * 将 SDP 文本中出现的所有域名替换为 DNS 解析后的 IP 地址.
  * 若某个域名解析失败，则原样保留.

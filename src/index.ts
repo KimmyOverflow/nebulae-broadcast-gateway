@@ -12,7 +12,6 @@ import { createAppRouter } from "./server/routers";
 import { errorHandler } from "./server/middlewares/error-handler";
 import { AppDatabaseRedis } from "./database/redis";
 import { appSession } from "./server/middlewares/session";
-// import { prepareTestAccount } from "./database/sql/test_account";
 
 
 const eventBus = new EventBus<AppEvents>()
@@ -54,5 +53,3 @@ const registrationCleanup = setInterval(() => {
     }
 }, REGISTRATION_CLEANUP_INTERVAL)
 registrationCleanup.unref()
-
-// prepareTestAccount(databaseSql, crypto)

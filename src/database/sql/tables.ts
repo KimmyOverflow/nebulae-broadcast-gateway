@@ -29,20 +29,6 @@ export function prepareTables(db: DatabaseSync) {
         CREATE INDEX IF NOT EXISTS idx_user_newest_profile_pic ON profile_pics(user_id, created_at DESC);
     `).run()
 
-    /* Deprecated: We use sessions and tokens now. */
-
-    // db.prepare(`
-    //     CREATE TABLE IF NOT EXISTS verified_clients (
-    //         user_id         INTEGER     NOT NULL,
-    //         client_id       TEXT        NOT NULL,
-    //         user_agent      TEXT        NOT NULL,
-    //         verified_at     DATETIME    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    //         last_used_at    DATETIME    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    //         FOREIGN KEY(user_id) REFERENCES users(id),
-    //         PRIMARY KEY(user_id, client_id)
-    //     );
-    // `).run()
-
     db.prepare(`
         CREATE TABLE IF NOT EXISTS refresh_tokens (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,

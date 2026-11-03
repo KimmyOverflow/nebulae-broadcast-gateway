@@ -1,8 +1,6 @@
 import { DatabaseSync, StatementSync, type SQLInputValue } from "node:sqlite";
 import { prepareStatements, type AppDatabaseSqlStatements } from "./statements";
 import { prepareTables } from "./tables";
-import { prepareTestAccount } from "./test_account";
-import type { AppCrypto } from "../../infra/crypto";
 import { SQLITE_DATABASE_PATH } from "../../consts";
 
 export class DatabaseError extends Error {
@@ -23,36 +21,6 @@ export class DatabaseError extends Error {
     }
 }
 
-/* Deprecated: old error handling code. */
-
-// /** Structured representation of a SQLite error thrown by `node:sqlite`. */
-// export interface SqliteError {
-//     /** Node.js error code, always `'ERR_SQLITE_ERROR'` for SQLite errors. */
-//     code: string
-//     /** SQLite extended error code (e.g. 2067 = UNIQUE constraint). */
-//     errcode: number
-//     /** Short SQLite error description (e.g. `'constraint failed'`). */
-//     errstr: string
-//     /** Human-readable error message. */
-//     message: string
-//     /** Error name, always `'Error'`. */
-//     name: string
-// }
-
-// /** Type guard: narrow an unknown thrown value to a `SqliteError`. */
-// function isSqliteError(err: unknown): err is SqliteError {
-//     return err instanceof Error
-//         && 'errcode' in err
-//         && typeof (err as Record<string, unknown>).errcode === 'number'
-//         && 'errstr' in err
-//         && typeof (err as Record<string, unknown>).errstr === 'string'
-// }
-
-// /** Check if a `SqliteError` is a UNIQUE constraint violation (errcode 2067). */
-// function isUniqueConstraintError(err: SqliteError): boolean {
-//     return err.errcode === 2067
-// }
-
 export type SqlDatabaseUser = {
     id: number,
     username: string,
@@ -72,22 +40,6 @@ export class AppDatabaseSql {
         this.db = new DatabaseSync(SQLITE_DATABASE_PATH)
         prepareTables(this.db)
         this.stmts = prepareStatements(this.db)
-
-        /* Deprecated: This piece of code don't work anymore because we have changed the user authentication method. */
-        // // 初始化 root 账户
-        // const existing = this.db.prepare(`SELECT id FROM users WHERE username = 'root'`).get() as { id: number } | undefined
-        // if (!existing) {
-        //     const hash = hashSync("nebulae", 10)
-        //     this.db.prepare(`
-        //         INSERT INTO users (id, username, password_hash, verified, role)
-        //         VALUES (0, 'root', ?, 1, 'admin')
-        //     `).run(hash)
-        //     this.logger.log({
-        //         level: LogLevel.Info,
-        //         prefix: "数据库",
-        //         content: "已创建默认 root 账户.",
-        //     })
-        // }
     }
 
     private wrapError(err: unknown, stmt: StatementSync, params: SQLInputValue[]) {
