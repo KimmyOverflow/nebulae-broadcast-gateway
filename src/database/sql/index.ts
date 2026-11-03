@@ -147,12 +147,6 @@ export class AppDatabaseSql {
         return row['data'] as string
     }
 
-    public getPasscodeHash(userId: number) {
-        const row = this.execGet(this.stmts.selectPasscodeHash, [userId])
-        if (row === undefined) return null
-        return row['passcode_hash'] as string
-    }
-
     public setUserVerified(userId: number) {
         return this.execRun(this.stmts.updateUserVerified, [userId])
     }

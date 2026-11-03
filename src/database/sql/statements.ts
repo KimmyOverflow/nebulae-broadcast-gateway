@@ -12,7 +12,6 @@ export type AppDatabaseSqlStatements = {
     updateUserVerified: StatementSync
     insertProfilePicture: StatementSync
     updateUsername: StatementSync
-    selectPasscodeHash: StatementSync
     updateTotpSecretEncrypted: StatementSync
     updateUserRecoveryPending: StatementSync
     deleteAbandonedRegistrations: StatementSync
@@ -93,11 +92,6 @@ export function prepareStatements(db: DatabaseSync): AppDatabaseSqlStatements {
         updateUsername: db.prepare(`
             UPDATE users
             SET username = ?
-            WHERE id = ?;
-        `),
-        selectPasscodeHash: db.prepare(`
-            SELECT passcode_hash
-            FROM users
             WHERE id = ?;
         `),
         updateTotpSecretEncrypted: db.prepare(`
